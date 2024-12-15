@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace EZBlocker
@@ -10,23 +9,6 @@ namespace EZBlocker
         private const int WM_APPCOMMAND = 0x319;
         private const int MEDIA_PLAYPAUSE = 0xE0000;
         private const int MEDIA_NEXTTRACK = 0xB0000;
-
-        public static void SetSpotifyMute(bool mute)
-        {
-            List<int> children = new List<int>();
-            foreach (Process p in Process.GetProcessesByName("spotify"))
-            {
-                children.Add(p.Id);
-            }
-            foreach (int child in children)
-            {
-                VolumeControl volumeControl = GetVolumeControl(child);
-                if (volumeControl != null)
-                {
-                    SetMute(volumeControl.Control, mute);
-                }
-            }
-        }
 
         public static void SendPlayPause(IntPtr target)
         {
@@ -82,8 +64,10 @@ namespace EZBlocker
             return peak * 100;
         }
 
-        public static VolumeControl GetVolumeControl(int p)
+        public static VolumeControl GetVolumeControl(HashSet<int> p)
         {
+            if (p == null) return null;
+
             ISimpleAudioVolume volumeControl = null;
             IMMDeviceEnumerator deviceEnumerator = null;
             IMMDevice speakers = null;
@@ -116,7 +100,7 @@ namespace EZBlocker
 
                         // Get and compare process id
                         ctl.GetProcessId(out ctlPid);
-                        if (p == ctlPid)
+                        if (p.Contains(ctlPid))
                         {
                             volumeControl = ctl as ISimpleAudioVolume;
                             break;

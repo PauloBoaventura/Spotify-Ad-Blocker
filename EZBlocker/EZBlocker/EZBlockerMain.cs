@@ -9,6 +9,8 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Win32;
 using System.Threading.Tasks;
+using System.Collections.ObjectModel;
+using System.Globalization;
 
 namespace EZBlocker
 {
@@ -28,7 +30,9 @@ namespace EZBlocker
         private Analytics a;
         private DateTime lastRequest;
         private string lastAction = "";
-        private MediaHook hook;
+        private SpotifyPatcher patcher;
+        private Listener listener;
+        private SpotifyHook hook;
 
         public Main()
         {
@@ -44,18 +48,17 @@ namespace EZBlocker
             try {
                 if (hook.IsRunning())
                 {
-                    Debug.WriteLine("Is running");
-                    if (hook.IsAdPlaying)
+                    if (hook.IsAdPlaying())
                     {
                         if (MainTimer.Interval != 1000) MainTimer.Interval = 1000;
                         if (!muted) Mute(true);
-                        if (!hook.IsPlaying)
+                        if (!hook.IsPlaying())
                         {
-                            hook.SendNextTrack();
+                            AudioUtils.SendNextTrack(hook.Handle == IntPtr.Zero ? Handle : hook.Handle);
                             Thread.Sleep(500);
                         }
 
-                        string artist = hook.CurrentArtist;
+                        string artist = hook.GetArtist();
                         string message = Properties.strings.StatusMuting + " " + Truncate(artist);
                         if (lastMessage != message)
                         {
@@ -65,17 +68,16 @@ namespace EZBlocker
                             LogAction("/mute/" + artist);
                         }
                     }
-                    else if (hook.IsPlaying) // Normal music
+                    else if (hook.IsPlaying() && !hook.WindowName.Equals("Spotify Free")) // Normal music
                     {
-                        Debug.WriteLine("Playing");
                         if (muted)
                         {
-                            Thread.Sleep(200); // Give extra time for ad to change out
+                            Thread.Sleep(500); // Give extra time for ad to change out
                             Mute(false);
                         }
                         if (MainTimer.Interval != 200) MainTimer.Interval = 200;
 
-                        string artist = hook.CurrentArtist;
+                        string artist = hook.GetArtist();
                         string message = Properties.strings.StatusPlaying + " " + Truncate(artist);
                         if (lastMessage != message)
                         {
@@ -85,7 +87,7 @@ namespace EZBlocker
                             LogAction("/play/" + artist);
                         }
                     }
-                    else
+                    else if (hook.WindowName.Equals("Spotify Free"))
                     {
                         string message = Properties.strings.StatusPaused;
                         if (lastMessage != message)
@@ -121,15 +123,15 @@ namespace EZBlocker
          **/
         private void Mute(bool mute)
         {
-            AudioUtils.SetSpotifyMute( mute);
-            muted = mute;
+            AudioUtils.SetMute(hook.VolumeControl.Control, mute);
+            muted = AudioUtils.IsMuted(hook.VolumeControl.Control) != null ? (bool)AudioUtils.IsMuted(hook.VolumeControl.Control) : false;
         }
 
         private string Truncate(string name)
         {
-            if (name.Length > 9)
+            if (name.Length > 10)
             {
-                return name.Substring(0, 9) + "...";
+                return name.Substring(0, 10) + "...";
             }
             return name;
         }
@@ -240,7 +242,11 @@ namespace EZBlocker
             a = new Analytics(Properties.Settings.Default.CID, Assembly.GetExecutingAssembly().GetName().Version.ToString());
 
             // Start Spotify hook
-            hook = new MediaHook();
+            hook = new SpotifyHook();
+
+            /* Start EZBlocker listener
+            listener = new Listener();
+            Task.Run(() => listener.Listen()); */
 
             MainTimer.Enabled = true;
 
@@ -399,6 +405,21 @@ namespace EZBlocker
             Process.Start(website);
         }
 
+        private void undoPatchToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Properties.Settings.Default.LastPatched = "";
+            Properties.Settings.Default.Save();
+
+            if (patcher.Restore())
+            {
+                MessageBox.Show(Properties.strings.UndoPatchOKMessageBox, "EZBlocker");
+            }
+            else
+            {
+                MessageBox.Show(Properties.strings.UndoPatchFailMessageBox, "EZBlocker");
+            }
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (!MainTimer.Enabled) return; // Still setting up UI
@@ -420,6 +441,5 @@ namespace EZBlocker
 
         [DllImport("shell32.dll")]
         public static extern bool IsUserAnAdmin();
-
     }
 }
